@@ -91,3 +91,48 @@ def modelValuation(model_name, y_true, y_proba, use_best_threshold=False):
 
     return y_pred, threshold
 
+def explain_customer_decision(model, customer_data, model_type="lightgbm", top_n=5):
+    import shap
+    import pandas as pd
+    import numpy as np
+
+    X = customer_data.copy()
+    if isinstance(X, pd.Series):  # if a single row was passed as Series
+        X = X.to_frame().T
+
+    proba = model.predict_proba(X)[0][1]
+    decision = int(proba >= 0.5)
+
+    if model_type == "tabnet":
+        # For TabNet, use internal feature importances (global, not local)
+        importances = model.feature_importances_
+        df = pd.DataFrame({
+            "feature": X.columns,
+            "effect": importances
+        }).sort_values("effect", ascending=False).head(top_n)
+        return decision, proba, df
+
+    else:
+        # Use SHAP for tree-based models
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X, check_additivity=False)
+
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]  # for binary classification → class 1
+
+        shap_values = shap_values[0]  # since only 1 row
+        feature_names = X.columns
+
+        df = pd.DataFrame({
+            "feature": feature_names,
+            "shap_value": shap_values,
+            "feature_value": X.values[0]
+        })
+
+        # Sort by SHAP impact: descending if approved (positive), ascending if rejected (negative)
+        df["abs_shap"] = np.abs(df["shap_value"])
+        df_sorted = df.sort_values(
+            by="shap_value", ascending=(decision == 0)  # rejection → show negative drivers
+        ).head(top_n)
+
+        return decision, proba, df_sorted[["feature", "feature_value", "shap_value"]]

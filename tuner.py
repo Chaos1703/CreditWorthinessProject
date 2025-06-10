@@ -109,40 +109,54 @@ def objective_factory(model_type, X, y , n_splits = 5 , cat_features = None , ca
 
         # TabNet
         elif model_type == "tabnet":
+
+            mask_type = trial.suggest_categorical("mask_type", ["sparsemax", "entmax"])
+
+            # 2) Then your params dict becomes:
             params = {
-                "n_d": trial.suggest_int("n_d", 8, 32),
-                "n_a": trial.suggest_int("n_a", 8, 32),
-                "n_steps": trial.suggest_int("n_steps", 3, 7),
-                "gamma": trial.suggest_float("gamma", 1.0, 2.0),
-                "lambda_sparse": trial.suggest_float("lambda_sparse", 1e-6, 1e-3, log=True),
-                "optimizer_params": dict(lr=trial.suggest_float("lr", 2e-2, 0.1, log=True)),
-                "mask_type": "entmax",
-                "verbose": 0,
-                ## FIX: Added crucial parameters for categorical features.
-                "cat_idxs": cat_idxs,
-                "cat_dims": cat_dims
+                "n_d":              trial.suggest_int("n_d", 8, 32, step=4),
+                "n_a":              trial.suggest_int("n_a", 8, 32, step=4),
+                "n_steps":          trial.suggest_int("n_steps", 3, 7),
+                "gamma":            trial.suggest_float("gamma", 1.0, 2.0),
+                "lambda_sparse":    trial.suggest_float("lambda_sparse", 1e-6, 1e-3, log=True),
+                # 3) Wrap the LR suggestion under the exact key you'll consume later:
+                "optimizer_params": {"lr": trial.suggest_float("lr", 1e-2, 3e-2, log=True)},
+                # 4) Use the mask_type you just suggested
+                "mask_type":        mask_type,
+                "verbose":          0,
+                "cat_idxs":         cat_idxs,
+                "cat_dims":         cat_dims,
+                # 5) Now cat_emb_dim is suggested and will appear in best_params
+                "cat_emb_dim":      trial.suggest_int("cat_emb_dim", 1, 3)
             }
+
+            
             skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
             macro_f1_scores = []
-        
-            if not isinstance(X, np.ndarray):
-                raise TypeError("For TabNet, please provide X and y as NumPy arrays.")
+            
+            # Ensure data is in NumPy format, as required by pytorch-tabnet
+            if not isinstance(X, np.ndarray) or not isinstance(y, np.ndarray):
+                raise TypeError("For TabNet tuning, please provide X and y as NumPy arrays.")
 
             for train_idx, valid_idx in skf.split(X, y):
                 X_tr, X_val = X[train_idx], X[valid_idx]
                 y_tr, y_val = y[train_idx], y[valid_idx]
+                
                 model = TabNetClassifier(**params)
                 model.fit(
                     X_tr, y_tr,
                     eval_set=[(X_val, y_val)],
-                    patience=20,
-                    max_epochs=200,
+                    patience=15, # Reduced for faster trials
+                    max_epochs=100, # Reduced for faster trials
+                    eval_metric=["logloss", "auc"],
                     batch_size=1024,
+                    virtual_batch_size=128,
                     drop_last=False,
                     weights=1
                 )
                 y_pred = model.predict(X_val)
                 macro_f1_scores.append(f1_score(y_val, y_pred, average="macro"))
+            
             return np.mean(macro_f1_scores)
         else:
             raise ValueError("Unsupported model type")
