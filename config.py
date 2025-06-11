@@ -1,39 +1,7 @@
-from sklearn.impute import KNNImputer
-from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 import pandas as pd
 import numpy as np
 import os
-
-# Define the imputation function as before
-
-def impute_numerical_knn(df, numeric_cols=None, n_neighbors=5):
-    df = df.copy()
-    
-    if numeric_cols is None:
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
-    # Ensure numeric conversion
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # Extract only numeric data
-    num_data = df[numeric_cols]
-
-    # Step 1: Standardize
-    scaler = StandardScaler()
-    scaled_data = scaler.fit_transform(num_data)
-
-    # Step 2: KNN Impute on standardized data
-    imputer = KNNImputer(n_neighbors=n_neighbors)
-    imputed_scaled = imputer.fit_transform(scaled_data)
-
-    # Step 3: Inverse transform to original scale
-    imputed_unscaled = scaler.inverse_transform(imputed_scaled)
-
-    # Update DataFrame
-    df[numeric_cols] = imputed_unscaled
-
-    return df
 
 # Updated clean_and_export including numeric imputation
 DATA_FILE = r"C:\Users\KrishnaWali\Downloads\german_credit_synthetic_balanced.csv"
@@ -45,9 +13,10 @@ DATA_COLUMNS = [
     'people_liable', 'telephone', 'foreign_worker', 'target'
 ]
 
-def clean_and_export():
+def clean_and_export(data_path = ""):
+    file_to_read = data_path if data_path else DATA_FILE
     # 1. Read the data
-    df = pd.read_csv(DATA_FILE, sep=",", header=0, names=DATA_COLUMNS, dtype=str, 
+    df = pd.read_csv(file_to_read, sep=",", header=0, names=DATA_COLUMNS, dtype=str, 
                      na_values=["?", "NA", "nan", "NULL" , ""], encoding="ISO-8859-1")
 
     # 3. Normalize and strip categorical text
@@ -58,7 +27,15 @@ def clean_and_export():
     for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].fillna("missing")
     
-    # 5. Identify numeric-like columns by attempting conversion
+    # 6. Adding Changes to the dataset for specific models
+    df = df.drop_duplicates()
+    df['log_credit_amount'] = np.log1p(df['credit_amount'])
+    df['log_duration_month'] = np.log1p(df['duration_month'])
+    df['monthly_payment'] = pd.to_numeric(df['credit_amount'], errors='coerce') / \
+                            pd.to_numeric(df['duration_month'], errors='coerce').replace(0, np.nan)
+
+
+    # 7. Identify numeric-like columns by attempting conversion
     numeric_cols = []
     for col in df.columns:
         if col == "target":
@@ -71,15 +48,17 @@ def clean_and_export():
         if non_null > 0 and (numeric_count / non_null) >= 0.9:
             numeric_cols.append(col)
     
-    # 6. Impute numeric NaNs using the random median ± x method
-    df = impute_numerical_knn(df, numeric_cols=numeric_cols)
+    df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
+    imputer = SimpleImputer(strategy="median")
+    df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
+
 
     df["target"] = df["target"].astype(int)
     
     # 9. Export cleaned file
     raw_folder, raw_name = os.path.split(DATA_FILE)
     base_name, _ext = os.path.splitext(raw_name)
-    cleaned_filename = f"{base_name}_cleaned.csv"
+    cleaned_filename = f"{base_name}_cleaned_optimized.csv"
     cleaned_path = os.path.join(raw_folder, cleaned_filename)
     df.to_csv(cleaned_path, index=False)
 

@@ -26,7 +26,9 @@ def objective_factory(model_type, X, y , n_splits = 5 , cat_features = None , ca
                 "n_estimators":      trial.suggest_int("n_estimators", 100, 2000),
                 "random_state":      42,
                 "n_jobs":            -1,
-                "class_weight":      "balanced"
+                "class_weight":      "balanced",
+                "verbose": -1,
+                "verbosity": -1,
             }
 
             # 2) 5-fold stratified CV
